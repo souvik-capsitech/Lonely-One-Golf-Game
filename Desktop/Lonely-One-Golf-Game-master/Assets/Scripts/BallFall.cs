@@ -1,24 +1,45 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public class BallFallDetector : MonoBehaviour
 {
     public float fallLimit = -15f;
-    public GameObject restartPanel;
+    private Vector3 startPos;
+    private Rigidbody2D rb;
+
+    void Start()
+    {
+        startPos = transform.position;
+        rb = GetComponent<Rigidbody2D>();
+    }
 
     void Update()
     {
         if (transform.position.y < fallLimit)
         {
-            StartCoroutine(GameOverAfterDelay());
+            HandleFall();
         }
     }
 
-    IEnumerator GameOverAfterDelay()
+    void HandleFall()
     {
-        yield return new WaitForSeconds(1f);
-        restartPanel.SetActive(true);
-        Time.timeScale = 0f;
+        LiveManager lifeManager = FindFirstObjectByType<LiveManager>();
+
+       
+        lifeManager.LoseLife();
+
+       
+        if (lifeManager.currentLives > 0)
+        {
+            ResetBall();
+        }
+       
+    }
+
+    void ResetBall()
+    {
+      
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
     }
 }

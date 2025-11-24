@@ -1,10 +1,10 @@
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 public class PlayerMovement : MonoBehaviour
 {
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-
     public float maxDrag = 4f;
     public float power = 8f;
     public Rigidbody2D rb;
@@ -13,41 +13,62 @@ public class PlayerMovement : MonoBehaviour
     Vector3 dragStartPos;
     bool dragging = false;
     public ParticleSystem impactEffect;
+    public RectTransform cancelButtonRect;
 
-    private bool firstHitDone = false;
+
+private bool firstHitDone = false;
     private bool dragApplied = false;
     public TrailRenderer trail;
-    public Character[] characterSwing;
+
     public GameObject restartPanel;
+    public bool touchedGround = false;
+
+    public Button cancelButton;
+    public float cancelTriggerPercent = 0.15f;
+
     void Start()
     {
-        trail.emitting = false;
+        trail.emitting = true;
         firstHitDone = false;
         trail.Clear();
         restartPanel.SetActive(false);
+
+        if (cancelButton != null)
+        {
+            cancelButton.onClick.AddListener(CancelShot);
+            cancelButton.gameObject.SetActive(false);
+        }
     }
 
-    // Update is called once per frame
     void Update()
     {
-
-        if (dragging == true)
+        if (dragging)
         {
             Vector3 draggingPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
             Vector3 finalDraggingPos = 2 * dragStartPos - draggingPos;
 
-
             lr.positionCount = 2;
             lr.SetPosition(1, finalDraggingPos);
 
-
             Vector3 force = dragStartPos - draggingPos;
             Vector3 clampedForce = Vector3.ClampMagnitude(force, maxDrag) * power;
-
             trajectory.Show(transform.position, clampedForce);
+
+            float screenY = Input.mousePosition.y / Screen.height;
+            if (screenY < cancelTriggerPercent)
+            {
+                cancelButton.gameObject.SetActive(true);
+            }
+
+            Vector2 fingerPos = Input.mousePosition;
+            if (RectTransformUtility.RectangleContainsScreenPoint(cancelButtonRect, fingerPos))
+            {
+                CancelShot();
+                return;
+            }
         }
 
-        if(dragging == false && Input.GetMouseButtonDown(0)) 
+        if (!dragging && Input.GetMouseButtonDown(0))
         {
             dragStartPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
             dragStartPos.z = 0;
@@ -58,43 +79,53 @@ public class PlayerMovement : MonoBehaviour
             lr.SetPosition(0, dragStartPos);
 
             trajectory.Hide();
-
         }
-        if (Input.GetMouseButtonUp(0))
+
+        if (Input.GetMouseButtonUp(0) && dragging)
         {
-            lr.positionCount = 0;
-            dragging = false;
-
-            Vector3 dragReleasePos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-
-            Vector3 force = dragStartPos - dragReleasePos;
-            Vector3 clampedForce = Vector3.ClampMagnitude(force, maxDrag) * power;
-
-            if(rb.linearVelocity.magnitude >=0 && rb.linearVelocity.magnitude <= 0.5f)
-            {
-                rb.AddForce(clampedForce, ForceMode2D.Impulse);
-             if(!firstHitDone)
-                {
-                    trail.emitting = true;
-                    firstHitDone = true;
-
-                }
-                foreach (Character c in characterSwing)
-                {
-                    c.Swing();
-                }
-
-            }
-
-            //trajectory.Hide();
-
+            FinishShot();
         }
-        if(rb.linearVelocity.magnitude <0.1f && firstHitDone)
+
+        if (rb.linearVelocity.magnitude < 0.1f && firstHitDone)
         {
             trail.emitting = false;
         }
+    }
 
+    void FinishShot()
+    {
+        lr.positionCount = 0;
+        dragging = false;
 
+        if (cancelButton != null)
+            cancelButton.gameObject.SetActive(false);
+
+        Vector3 dragReleasePos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector3 force = dragStartPos - dragReleasePos;
+        Vector3 clampedForce = Vector3.ClampMagnitude(force, maxDrag) * power;
+
+        if (rb.linearVelocity.magnitude <= 0.5f)
+        {
+            rb.AddForce(clampedForce, ForceMode2D.Impulse);
+
+            if (!firstHitDone)
+            {
+                trail.emitting = true;
+                firstHitDone = true;
+            }
+        }
+
+        trajectory.Hide();
+    }
+
+    public void CancelShot()
+    {
+        dragging = false;
+        lr.positionCount = 0;
+        trajectory.Hide();
+
+        if (cancelButton != null)
+            cancelButton.gameObject.SetActive(false);
     }
 
     private void OnCollisionEnter2D(Collision2D collision)
@@ -104,30 +135,40 @@ public class PlayerMovement : MonoBehaviour
             impactEffect.transform.position = transform.position;
             impactEffect.Play();
         }
+
         if (collision.collider.CompareTag("Ground"))
         {
-            if(!dragApplied)
-            {
-                rb.linearDamping = 1.5f;
-                dragApplied = true;
-            }
+            touchedGround = true;
         }
-
-
     }
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
         if (collision.CompareTag("Water"))
         {
-            StartCoroutine(GameOverDelay());
-           
+            StartCoroutine(LifeLoss());
         }
     }
-    IEnumerator GameOverDelay()
+
+    IEnumerator LifeLoss()
     {
-        yield return new WaitForSeconds(0.5f);  
-        GameOver();
+        yield return new WaitForSeconds(0.3f);
+
+        LiveManager lifeManager = FindFirstObjectByType<LiveManager>();
+        lifeManager.LoseLife();
+
+        if (lifeManager.currentLives > 0)
+        {
+            // Reset ball position to level spawn
+            LevelManager levelManager = FindFirstObjectByType<LevelManager>();
+            levelManager.LoadLevel(levelManager.CurrentLevelIndex);
+
+            ResetBall();
+        }
+        else
+        {
+            GameOver();
+        }
     }
 
     private void GameOver()
@@ -137,14 +178,21 @@ public class PlayerMovement : MonoBehaviour
         rb.linearVelocity = Vector2.zero;
         rb.bodyType = RigidbodyType2D.Kinematic;
 
-      
         trail.emitting = false;
 
-      
         Time.timeScale = 0f;
         restartPanel.SetActive(true);
-        dragApplied = false;
-        rb.linearDamping = 0f;
+    }
+
+    public void ResetBall()
+    {
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
+
+        trail.Clear();
+
+        firstHitDone = false;
+        trail.emitting = false;  
     }
 
 
